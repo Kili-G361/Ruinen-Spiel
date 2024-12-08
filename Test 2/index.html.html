@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>2D Abbau-Spiel in der Höhle</title>
+<style>
+    body {
+        margin: 0;
+        font-family: sans-serif;
+        background: url('start.jpg') no-repeat center center fixed;
+        background-size: cover;
+        color: #fff;
+        overflow: hidden;
+        user-select: none;
+    }
+    #gameCanvas {
+        position: absolute;
+        top: 0;
+        left: 0;
+        display: block;
+    }
+    #info {
+        position: absolute;
+        top: 10px; left: 10px;
+        background: rgba(0,0,0,0.5);
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 16px;
+        z-index: 2;
+        display: none;
+    }
+    #optionsBtn, #pauseBtn {
+        position: absolute;
+        top: 10px;
+        background: rgba(0,0,0,0.5);
+        padding: 10px;
+        border-radius: 5px;
+        font-size: 16px;
+        border: none;
+        color: #fff;
+        cursor: pointer;
+        z-index: 2;
+        display: none;
+    }
+    #optionsBtn { right: 10px; }
+    #pauseBtn { right: 100px; }
+    #startMenu {
+        position: absolute;
+        top:0; left:0; right:0; bottom:0;
+        background: rgba(0,0,0,0.5);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 3;
+        flex-direction: column;
+    }
+    #startMenu button {
+        padding: 20px;
+        font-size: 24px;
+        background: #444;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        margin: 10px;
+        cursor: pointer;
+    }
+    #optionsOverlay {
+        position: absolute;
+        top:0; left:0; right:0; bottom:0;
+        background: rgba(0,0,0,0.7);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 4;
+        flex-direction: column;
+    }
+    #optionsOverlay label {
+        font-size: 18px;
+        margin-bottom: 10px;
+    }
+    #optionsOverlay .slider-container {
+        margin-bottom: 20px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+    }
+    #optionsOverlay input[type=range] {
+        width: 200px;
+    }
+    #optionsOverlay button {
+        margin-top: 20px;
+        padding: 10px;
+        background: #333;
+        color: #fff;
+        border: none;
+        cursor: pointer;
+    }
+    #pauseOverlay {
+        position: absolute;
+        top:0; left:0; right:0; bottom:0;
+        background: rgba(0,0,0,0.7);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        z-index: 5;
+        flex-direction: column;
+    }
+    #pauseOverlay button {
+        padding: 20px;
+        font-size: 24px;
+        cursor: pointer;
+        background: #444;
+        color: #fff;
+        border: none;
+        border-radius: 10px;
+        margin-top: 20px;
+    }
+    #pauseOverlay h1 {
+        font-size: 36px;
+        margin-bottom: 20px;
+    }
+</style>
+</head>
+<body>
+<div id="startMenu">
+    <button id="startBtn">Spiel starten</button>
+    <button id="startOptionsBtn">Optionen</button>
+</div>
+<div id="info">Steine: <span id="stoneCount">0</span></div>
+<button id="pauseBtn">Pause</button>
+<button id="optionsBtn">Optionen</button>
+<div id="optionsOverlay">
+    <div class="slider-container">
+        <label>Musiklautstärke:</label>
+        <input type="range" id="musicVolumeSlider" min="0" max="1" step="0.1" value="0.3">
+    </div>
+    <div class="slider-container">
+        <label>Sound Effects Lautstärke:</label>
+        <input type="range" id="sfxVolumeSlider" min="0" max="1" step="0.1" value="0.5">
+    </div>
+    <button id="closeOptionsBtn">Schließen</button>
+</div>
+<div id="pauseOverlay">
+    <h1>Spiel pausiert</h1>
+    <button id="resumeBtn">Fortsetzen</button>
+</div>
+<canvas id="gameCanvas"></canvas>
+
+<audio id="bgMusic" src="bg_music.mp3" loop preload="auto"></audio>
+<audio id="mineSound" src="mine_sound.wav" preload="auto"></audio>
+
+<script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const stoneCountEl = document.getElementById('stoneCount');
+    const startMenu = document.getElementById('startMenu');
+    const startBtn = document.getElementById('startBtn');
+    const startOptionsBtn = document.getElementById('startOptionsBtn');
+    const info = document.getElementById('info');
+    const optionsBtn = document.getElementById('optionsBtn');
+    const pauseBtn = document.getElementById('pauseBtn');
+    const optionsOverlay = document.getElementById('optionsOverlay');
+    const pauseOverlay = document.getElementById('pauseOverlay');
+    const resumeBtn = document.getElementById('resumeBtn');
+    const musicVolumeSlider = document.getElementById('musicVolumeSlider');
+    const sfxVolumeSlider = document.getElementById('sfxVolumeSlider');
+    const closeOptionsBtn = document.getElementById('closeOptionsBtn');
+
+    const bgMusic = document.getElementById('bgMusic');
+    const mineSound = document.getElementById('mineSound');
+
+    const backgroundImg = new Image();
+    backgroundImg.src = 'background.jpg'; 
+    const charImg = new Image();
+    charImg.src = 'character.png'; 
+    const rockImg = new Image();
+    rockImg.src = 'rock.png';
+
+    const WORLD_WIDTH = 1920;
+    const WORLD_HEIGHT = 1080;
+    const groundY = WORLD_HEIGHT - 100; 
+
+    let charX = WORLD_WIDTH / 2;
+    let charY = groundY;
+    const charSpeed = 3;
+    let stones = 0;
+    let keys = {};
+    let facingRight = false;
+    let gameRunning = false; 
+    let paused = false; 
+
+    const CHARACTER_SIZE = 128;
+    const ROCK_SIZE = 64;
+    const zoomFactor = 2;
+
+    let musicVolume = 0.3;
+    let sfxVolume = 0.5;
+
+    let resources = [
+        {x: 960, y: groundY, type: 'rock'},
+        {x: 980, y: groundY, type: 'rock'},
+        {x: 1100, y: groundY, type: 'rock'},
+        {x: 1200, y: groundY, type: 'rock'},
+    ];
+
+    let cameraX = 0;
+    let cameraY = 0;
+
+    let miningTarget = null;
+    let miningProgress = 0;
+    let miningSpeed = 0.01;
+    const miningRange = 80;
+
+    let stoneOffset = ROCK_SIZE * 0.9; 
+    let initialTouchX = null;
+    let touchThreshold = 30;
+
+    function respawnStone() {
+        if (!gameRunning) return;
+        setTimeout(() => {
+            if (!gameRunning || paused) {
+                respawnStone();
+                return;
+            }
+            let offsetX = Math.random() * 400 - 200; 
+            let newX = charX + offsetX;
+            if (newX < 0) newX = 0;
+            if (newX > WORLD_WIDTH) newX = WORLD_WIDTH;
+            resources.push({x: newX, y: groundY, type: 'rock'});
+        }, 10000);
+    }
+    respawnStone();
+
+    function resizeCanvas() {
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resizeCanvas);
+    resizeCanvas();
+
+    window.addEventListener('keydown', (e) => {
+        keys[e.code] = true;
+    });
+    window.addEventListener('keyup', (e) => {
+        keys[e.code] = false;
+    });
+
+    canvas.addEventListener('touchstart', (e) => {
+        if (e.touches.length > 0) {
+            initialTouchX = e.touches[0].clientX;
+        }
+    });
+    canvas.addEventListener('touchmove', (e) => {
+        if (initialTouchX !== null && e.touches.length > 0) {
+            let currentX = e.touches[0].clientX;
+            let diff = currentX - initialTouchX;
+            if (diff > touchThreshold) {
+                keys['ArrowRight'] = true;
+                keys['ArrowLeft'] = false;
+            } else if (diff < -touchThreshold) {
+                keys['ArrowLeft'] = true;
+                keys['ArrowRight'] = false;
+            } else {
+                keys['ArrowLeft'] = false;
+                keys['ArrowRight'] = false;
+            }
+        }
+    });
+    canvas.addEventListener('touchend', () => {
+        initialTouchX = null;
+        keys['ArrowLeft'] = false;
+        keys['ArrowRight'] = false;
+    });
+
+    startBtn.addEventListener('click', () => {
+        startMenu.style.display = 'none';
+        document.body.style.background = "#000";
+        bgMusic.volume = musicVolume;
+        mineSound.volume = sfxVolume;
+        gameRunning = true;
+        info.style.display = 'block';
+        optionsBtn.style.display = 'block';
+        pauseBtn.style.display = 'block';
+        bgMusic.play().catch(e => console.log("Autoplay blockiert, Spiel läuft trotzdem."));
+    });
+
+    startOptionsBtn.addEventListener('click', () => {
+        optionsOverlay.style.display = 'flex';
+    });
+
+    optionsBtn.addEventListener('click', () => {
+        optionsOverlay.style.display = 'flex';
+    });
+
+    closeOptionsBtn.addEventListener('click', () => {
+        optionsOverlay.style.display = 'none';
+    });
+
+    musicVolumeSlider.addEventListener('input', () => {
+        musicVolume = parseFloat(musicVolumeSlider.value);
+        bgMusic.volume = musicVolume;
+    });
+    sfxVolumeSlider.addEventListener('input', () => {
+        sfxVolume = parseFloat(sfxVolumeSlider.value);
+        mineSound.volume = sfxVolume;
+    });
+
+    pauseBtn.addEventListener('click', () => {
+        if (gameRunning && !paused) {
+            paused = true;
+            bgMusic.pause(); 
+            pauseOverlay.style.display = 'flex';
+        }
+    });
+
+    resumeBtn.addEventListener('click', () => {
+        if (paused) {
+            paused = false;
+            pauseOverlay.style.display = 'none';
+            bgMusic.play(); 
+        }
+    });
+
+    function update() {
+        if (!gameRunning || paused) return; 
+
+        let movingLeft = keys['ArrowLeft'] || false;
+        let movingRight = keys['ArrowRight'] || false;
+
+        if (movingLeft) {
+            charX -= charSpeed;
+            facingRight = false;
+        }
+        if (movingRight) {
+            charX += charSpeed;
+            facingRight = true;
+        }
+
+        if (charX < 0) charX = 0;
+        if (charX > WORLD_WIDTH) charX = WORLD_WIDTH;
+
+        let halfScreenWidth = (canvas.width / zoomFactor) / 2;
+        let halfScreenHeight = (canvas.height / zoomFactor) / 2;
+
+        cameraX = charX - halfScreenWidth;
+        cameraY = groundY - halfScreenHeight;
+
+        if (cameraX < 0) cameraX = 0;
+        if (cameraX > WORLD_WIDTH - (canvas.width / zoomFactor)) {
+            cameraX = WORLD_WIDTH - (canvas.width / zoomFactor);
+        }
+        if (cameraY < 0) cameraY = 0;
+        if (cameraY > WORLD_HEIGHT - (canvas.height / zoomFactor)) {
+            cameraY = WORLD_HEIGHT - (canvas.height / zoomFactor);
+        }
+
+        // Mining
+        if (miningTarget === null) {
+            let nearest = null;
+            let nearestDist = Infinity;
+            for (let r of resources) {
+                let dist = Math.sqrt((r.x - charX)**2 + (r.y - charY)**2);
+                if (dist < nearestDist) {
+                    nearestDist = dist;
+                    nearest = r;
+                }
+            }
+            if (nearest && nearestDist < miningRange) {
+                miningTarget = nearest;
+                miningProgress = 0;
+            }
+        } else {
+            let dist = Math.sqrt((miningTarget.x - charX)**2 + (miningTarget.y - charY)**2);
+            if (dist < miningRange) {
+                miningProgress += miningSpeed;
+                if (miningProgress >= 1) {
+                    removeResource(miningTarget);
+                    stones += 1;
+                    stoneCountEl.textContent = stones;
+                    miningTarget = null;
+                    miningProgress = 0;
+                    mineSound.currentTime = 0;
+                    mineSound.volume = sfxVolume;
+                    mineSound.play();
+                    respawnStone();
+                }
+            } else {
+                miningTarget = null;
+                miningProgress = 0;
+            }
+        }
+    }
+
+    function removeResource(r) {
+        let index = resources.indexOf(r);
+        if (index !== -1) {
+            resources.splice(index, 1);
+        }
+    }
+
+    function draw() {
+        if (!gameRunning) return;
+
+        ctx.fillStyle = '#222';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+        ctx.save();
+        ctx.scale(zoomFactor, zoomFactor);
+        ctx.translate(-cameraX, -cameraY);
+
+        if (backgroundImg.complete && backgroundImg.width > 0) {
+            ctx.drawImage(backgroundImg, 0, 0);
+        }
+
+        for (let r of resources) {
+            ctx.drawImage(rockImg, r.x - ROCK_SIZE/2, r.y - stoneOffset, ROCK_SIZE, ROCK_SIZE);
+        }
+
+        ctx.save();
+        if (facingRight) {
+            ctx.translate(charX, charY);
+            ctx.scale(-1, 1);
+            ctx.drawImage(charImg, -CHARACTER_SIZE/2, -CHARACTER_SIZE, CHARACTER_SIZE, CHARACTER_SIZE);
+        } else {
+            ctx.drawImage(charImg, charX - CHARACTER_SIZE/2, charY - CHARACTER_SIZE, CHARACTER_SIZE, CHARACTER_SIZE);
+        }
+        ctx.restore();
+
+        ctx.restore();
+
+        if (miningTarget !== null) {
+            let barWidth = 200;
+            let barHeight = 20;
+            let barX = (canvas.width - barWidth) / 2;
+            let barY = canvas.height - barHeight - 5;
+
+            ctx.fillStyle = '#000';
+            ctx.fillRect(barX, barY, barWidth, barHeight);
+
+            ctx.fillStyle = '#0f0';
+            ctx.fillRect(barX, barY, barWidth * miningProgress, barHeight);
+
+            ctx.strokeStyle = '#fff';
+            ctx.strokeRect(barX, barY, barWidth, barHeight);
+        }
+    }
+
+    function gameLoop() {
+        update();
+        draw();
+        requestAnimationFrame(gameLoop);
+    }
+    gameLoop();
+</script>
+</body>
+</html>
